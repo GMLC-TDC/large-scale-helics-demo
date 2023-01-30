@@ -1,0 +1,22 @@
+{
+    "core_type" : "zmqss",
+    "publications": [
+        {
+            "key": "centralcontroller/gridlabd",
+            "global": false,
+            "type": "double",
+            "unit": "VA"
+        }
+    ],
+	"endpoints":[
+		{
+			"global": false,
+			"type": "double",
+			"info": {
+				"message_type": "JSON",
+				"receive_messages": true
+			}
+		}
+	]
+    
+}
