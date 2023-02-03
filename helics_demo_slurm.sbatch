@@ -1,15 +1,15 @@
 #!/bin/bash
 
 #SBATCH --ntasks-per-node=1
-#SBATCH -N 100
-#SBATCH -n 100
+#SBATCH -N 10
+#SBATCH -n 10
 #SBATCH -p pbatch
-#SBATCH -t 6:00:00
+#SBATCH -t 08:00:00
 
 ###### Potential configs that may be needed #######
-#PATH=$PATH:~/.local/bin
-#PATH=$PATH:~/HELICS_demo/gridlab-d/bin
-#module load python/3.8.2
+PATH=$PATH:~/.local/bin
+PATH=$PATH:~/HELICS_demo/gridlab-d/bin
+module load python/3.8.2
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 if [ -n "$SLURM_JOB_ID" ]; then
@@ -18,7 +18,6 @@ if [ -n "$SLURM_JOB_ID" ]; then
 fi
 echo "sbatch script location: $SCRIPT_DIR"
 
-# set coretype to other cores using --export=CORE_TYPE='<type>' argument to sbatch
 if [[ "${CORE_TYPE}" == "" ]]; then
     CORE_TYPE="zmqss"
 fi
@@ -40,7 +39,8 @@ HOUSES PER NODE: ${HOUSES_PER_NODE}
 SLURM_SUBMIT_HOST = ${SLURM_SUBMIT_HOST}
 SLURMD_NODENAME = ${SLURMD_NODENAME}
 "
-
+main_address=$(hostname -i)
+echo "main address: ${main_address}"
 TOTAL_HOUSES=$((SLURM_JOB_NUM_NODES * HOUSES_PER_NODE))
 total_nodes=$((TOTAL_HOUSES + 2))
 
@@ -49,7 +49,7 @@ for i in $(seq 1 "${SLURM_JOB_NUM_NODES}"); do
     ((idx = ${i} - 1))
     ((start = ${idx}*${HOUSES_PER_NODE}))
     ((end = ${start} + ${HOUSES_PER_NODE} -1))
-    srun --exclusive --ntasks 1 --nodes 1 "$SCRIPT_DIR/runner.sh" "${HOSTNAME}" "${start}" "${end}" "${TOTAL_HOUSES}" "${HOUSES_PER_NODE}" &
+    srun --ntasks 1 --nodes 1 "$SCRIPT_DIR/runner.sh" "${HOSTNAME}" "${main_address}" "${start}" "${end}" "${TOTAL_HOUSES}" "${HOUSES_PER_NODE}" &
 done
 
 wait

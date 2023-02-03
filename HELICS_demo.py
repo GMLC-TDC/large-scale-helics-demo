@@ -33,7 +33,7 @@ def Callback(time, iterating, userData):
     userdata.gridlabd_ept.send_data(msg)
 
 def destroyfederate(fed):
-    helics.helicsFederateFinalize(fed)
+    helics.helicsFederateDisconnect(fed)
     helics.helicsFederateFree(fed)
     helics.helicsCloseLibrary()
 
@@ -58,8 +58,8 @@ if __name__=="__main__":
     end_fed_num = int(sys.argv[3])
     self_node_id = socket.gethostname()
     gridlabd_instance = socket.gethostname()             
-    root_broker_address = socket.gethostbyname(main_node_id)       
-    self_address = socket.gethostbyname(self_node_id)
+    root_broker_address = "tcp://"+str(socket.gethostbyname(main_node_id))      
+    self_address = "tcp://"+str(socket.gethostbyname(self_node_id))
 
     num_houses = end_fed_num - start_fed_num + 1
     gridlabd_instance_name = "gridlabd_" + gridlabd_instance
@@ -67,14 +67,14 @@ if __name__=="__main__":
 
     if main_node_id == self_node_id:
         num_feds = num_houses + 2                                         #add gridlabd fed & central controller
-        logger.info(f"Creating central controller federate @ {self_address}")
+        logger.info(f"Creating central controller federate @ {self_address} = {root_broker_address}")
         fedinfo = helics.helicsCreateFederateInfo()
         fedinfo.core_name = "centralcontroller"
         fedinfo.core_type = "zmqss"
         fedinfo.core_init = f"-f 1 --broker=mainbroker --broker_address={self_address}"
         central_controller_fed = helics.helicsCreateCombinationFederate("centralcontroller", fedinfo)
-        central_controller_fed.register_endpoint("centralcontroller")
-        central_controller_sub = central_controller_fed.register_subscription("centralcontroller/gridlabd", "VA")
+        helics.helicsFederateRegisterEndpoint(central_controller_fed, "centralcontroller")
+        central_controller_sub = helics.helicsFederateRegisterSubscription(central_controller_fed, "centralcontroller/gridlabd", "VA")
         broker_name = "mainbroker"
         
     else:
@@ -88,20 +88,17 @@ if __name__=="__main__":
     # create house federates, register targeted endpts
     logger.info("Creating callback federates connecting to broker at " + self_address)
     for num in range(start_fed_num, end_fed_num+1):
-        house_epts = {}
-        house_name="house_${#}"  
+        house_name=f"house_${num}"  
         fed=createCallbackFederate(house_name, broker_name, self_address)
         house_feds.append(fed)
 
         # register a targeted endpoint to gridlabd_instance federate
         house_gridlabd_endpt=helics.helicsFederateRegisterTargetedEndpoint(fed, f'{house_name}/{gridlabd_instance_name}')
         helics.helicsEndpointAddDestinationTarget(house_gridlabd_endpt, gridlabd_instance_name)
-        house_epts["gridlabd"] = house_gridlabd_endpt
 
         # register a targeted endpoint to central controller federate
         house_central_controller_endpt = helics.helicsFederateRegisterTargetedEndpoint(fed, f'{house_name}/{"centralcontroller"}')
         helics.helicsEndpointAddSourceTarget(house_central_controller_endpt, "centralcontroller")
-        house_epts["central_controller"] = house_central_controller_endpt
 
         # set time return callback
         # time request triggered by event 
@@ -111,48 +108,44 @@ if __name__=="__main__":
         helics.helicsFederateSetTimeRequestReturnCallback(fed, Callback, handle)
 
     ##### Enter Initialization Mode #####
-    logger.info("ENTERING INITIALIZATION MODE")
+    logger.info(f"ENTERING INITIALIZATION MODE {self_node_id}")
     for fed in house_feds:
         helics.helicsFederateEnterInitializingMode(fed)
 
-    ##### Enter Execution Mode #####
-    logger.info("ENTERING EXECUTION MODE")
-    if main_node_id == self_node_id:
-        helics.helicsFederateEnterExecutingMode(central_controller_fed)
 
+    ##### Enter Execution Mode #####
+    logger.info(f"ENTERING EXECUTION MODE {self_node_id}")
+
+    if main_node_id == self_node_id:
+        helics.helicsFederateEnterExecutingModeAsync(central_controller_fed)
+        helics.helicsFederateEnterExecutingModeComplete(central_controller_fed)
+    logger.info("hang check")
 
     hours = 8
-    total_interval = (60*60*hours)
+    total_interval = int(60*60*hours)
     time_step = 15*60
     time_granted = -1
     threshold = 100
     init_values = True
 
-    #### Start #####
+    
     if main_node_id == self_node_id:
-        start_time = helics.HELICS_TIME_MAXTIME
-        time_granted = helics.helicsFederateRequestTime(central_controller_fed, start_time)
-
-        while time_granted < total_interval:        
-            ##### home federate request temp calc to gridlabd #####
+        while time_granted <= total_interval:
+            logger.info("time enter")
+            time_granted = helics.helicsFederateRequestTime(central_controller_fed, time_step)
             value = central_controller_fed.subscriptions[f"centralcontroller/gridlabd"].value
-            if init_values:
-                threshold = value - 100
-                init_values=False
+            logger.info(f"CENTRAL CONTROLLER: Received value = {value} at time {time_granted}")
+
+            if value == threshold:
+                new_value = value
+            elif value < threshold:
+                new_value = value+1
             else:
-                print(f"received total_load: {value} from gridlabd")
-                if value == threshold:
-                    new_value = value
-                elif value < threshold:
-                    new_value = value+1
-                else:
-                    new_value = value-1
+                new_value = value-1
 
             helics.helicsEndpointSendMessage(central_controller_fed.get_endpoint_by_name("centralcontroller"), new_value)
             print("new temp:" + new_value)
 
-        time_granted = helics.helicsFederateRequestTime(central_controller_fed, helics.HELICS_TIME_MAXTIME)
-    
     ##### cleanup #####
     for fed in house_feds:
         destroyfederate(fed)
